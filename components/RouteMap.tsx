@@ -5,13 +5,23 @@ import type { LatLngExpression } from "leaflet"
 import { useMemo } from "react"
 import { decodeMBTAPolyline } from "@/lib/polyline"
 
-export function RouteMap({ encodedPolyline }: { encodedPolyline: string | null }) {
-  const points = useMemo(() => {
-    if (!encodedPolyline) return []
-    return decodeMBTAPolyline(encodedPolyline).map((p) => [p.lat, p.lng] as LatLngExpression)
-  }, [encodedPolyline])
+type Props = {
+  encodedPolylines: string[] // multiple legs
+}
 
-  const center = points.length ? (points[Math.floor(points.length / 2)] as LatLngExpression) : ([42.3601, -71.0589] as LatLngExpression)
+export function RouteMap({ encodedPolylines }: Props) {
+  const lines = useMemo(() => {
+    return (encodedPolylines ?? [])
+      .filter(Boolean)
+      .map((enc) => decodeMBTAPolyline(enc).map((p) => [p.lat, p.lng] as LatLngExpression))
+      .filter((arr) => arr.length > 1)
+  }, [encodedPolylines])
+
+  const center: LatLngExpression = useMemo(() => {
+    const first = lines[0]
+    if (first && first.length) return first[Math.floor(first.length / 2)]
+    return [42.3601, -71.0589] // Boston fallback
+  }, [lines])
 
   return (
     <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }}>
@@ -19,7 +29,18 @@ export function RouteMap({ encodedPolyline }: { encodedPolyline: string | null }
         attribution='&copy; OpenStreetMap contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {points.length > 0 && <Polyline positions={points} />}
+
+      {lines.map((positions, idx) => (
+        <Polyline
+          key={idx}
+          positions={positions}
+          pathOptions={{
+            color: idx === 0 ? "#16a34a" : "#2563eb",
+            weight: 5,
+            opacity: 0.9,
+          }}
+        />
+      ))}
     </MapContainer>
   )
 }

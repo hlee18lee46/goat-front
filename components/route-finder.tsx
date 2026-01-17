@@ -7,7 +7,9 @@ import { getNearbyStops, searchStopsByQuery } from "@/lib/mbta"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { MapPin, Navigation, ArrowRightLeft, AlertTriangle, Loader2, Check } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { MapPin, Navigation, ArrowRightLeft, AlertTriangle, Loader2, Check, Clock } from "lucide-react"
 
 interface RouteFinderProps {
   isConnected: boolean
@@ -27,6 +29,16 @@ function toStopOption(stop: any): StopOption {
   }
 }
 
+// helper: default datetime-local string = now + 5 minutes (rounded)
+function defaultDepartLocal(): string {
+  const d = new Date()
+  d.setMinutes(d.getMinutes() + 5)
+  d.setSeconds(0, 0)
+  // yyyy-MM-ddTHH:mm in local time
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export function RouteFinder({ isConnected }: RouteFinderProps) {
   const router = useRouter()
   const { location, getLocation } = useGeolocation()
@@ -35,7 +47,7 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
   const [origin, setOrigin] = useState<StopOption | null>(null)
   const [destination, setDestination] = useState<StopOption | null>(null)
 
-  // input text fields (what user types)
+  // input text fields
   const [originText, setOriginText] = useState("")
   const [destinationText, setDestinationText] = useState("")
 
@@ -45,6 +57,10 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
   const [isLocating, setIsLocating] = useState(false)
   const [showOriginList, setShowOriginList] = useState(false)
   const [showDestinationList, setShowDestinationList] = useState(false)
+
+  // ✅ Depart time
+  const [useCustomDepart, setUseCustomDepart] = useState(false)
+  const [departLocal, setDepartLocal] = useState(defaultDepartLocal())
 
   // --- ORIGIN: geolocation -> nearest stops
   useEffect(() => {
@@ -68,7 +84,6 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
   // --- ORIGIN: text search debounce
   useEffect(() => {
     if (isLocating) return
-
     const t = setTimeout(async () => {
       if (originText.length >= 3 && !showOriginList) {
         try {
@@ -80,7 +95,6 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
         }
       }
     }, 450)
-
     return () => clearTimeout(t)
   }, [originText, showOriginList, isLocating])
 
@@ -97,7 +111,6 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
         }
       }
     }, 450)
-
     return () => clearTimeout(t)
   }, [destinationText, showDestinationList])
 
@@ -123,7 +136,20 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
 
   const handleFindFastestRoute = () => {
     if (!origin?.id || !destination?.id) return
-    router.push(`/results?origin=${encodeURIComponent(origin.id)}&dest=${encodeURIComponent(destination.id)}`)
+
+    const params = new URLSearchParams({
+      origin: origin.id,
+      dest: destination.id,
+    })
+
+    // ✅ include depart time only if user enabled it
+    if (useCustomDepart) {
+      // departLocal is in local time; send as ISO-like string
+      // backend can treat it as local or parse as America/New_York if you want
+      params.set("depart", departLocal)
+    }
+
+    router.push(`/results?${params.toString()}`)
   }
 
   return (
@@ -148,19 +174,14 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
                 value={originText}
                 onChange={(e) => {
                   setOriginText(e.target.value)
-                  setOrigin(null) // typing means "not selected yet"
+                  setOrigin(null)
                   setShowOriginList(false)
                 }}
                 className="pl-9"
               />
             </div>
 
-            <Button
-              variant="outline"
-              onClick={handleNearMeClick}
-              disabled={isLocating}
-              className="min-w-[100px]"
-            >
+            <Button variant="outline" onClick={handleNearMeClick} disabled={isLocating} className="min-w-[100px]">
               {isLocating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Near Me"}
             </Button>
           </div>
@@ -221,6 +242,39 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
           )}
         </div>
 
+        {/* ✅ Depart time selector */}
+        <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-sm font-medium">Depart time</Label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Leave now</Label>
+              <Switch
+                checked={useCustomDepart}
+                onCheckedChange={(v) => setUseCustomDepart(Boolean(v))}
+              />
+              <Label className="text-xs text-muted-foreground">Schedule</Label>
+            </div>
+          </div>
+
+          {useCustomDepart && (
+            <Input
+              type="datetime-local"
+              value={departLocal}
+              onChange={(e) => setDepartLocal(e.target.value)}
+            />
+          )}
+
+          {!useCustomDepart && (
+            <p className="text-xs text-muted-foreground">
+              Using current time on this device.
+            </p>
+          )}
+        </div>
+
         {!isConnected && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm">
             <AlertTriangle className="h-4 w-4" />
@@ -228,12 +282,7 @@ export function RouteFinder({ isConnected }: RouteFinderProps) {
           </div>
         )}
 
-        <Button
-          className="w-full"
-          size="lg"
-          disabled={!origin?.id || !destination?.id}
-          onClick={handleFindFastestRoute}
-        >
+        <Button className="w-full" size="lg" disabled={!origin?.id || !destination?.id} onClick={handleFindFastestRoute}>
           Find Fastest Route
         </Button>
       </CardContent>

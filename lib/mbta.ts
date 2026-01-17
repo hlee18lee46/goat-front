@@ -49,10 +49,10 @@ export async function getTransferPredictions(stopId: string) {
 }
 
 /** Route options (still mocked in your code) */
-export async function getRouteOptions(originId: string, destId: string) {
+export async function getRouteOptions(originId: string, destId: string, depart?: string | null) {
   const params = new URLSearchParams({ origin: originId, dest: destId })
-  const json = await getJSON(`${API_BASE}/route_options?${params.toString()}`)
-  return json
+  if (depart) params.set("depart", depart)
+  return getJSON(`${API_BASE}/route_options?${params.toString()}`)
 }
 
 
@@ -67,13 +67,15 @@ export function calculateTransferStatus(arrivalPrediction: any, departurePredict
 }
 
 /** Map shape polyline (route filter sometimes returns multiple shapes; we take first) */
+
+
 export async function getShapeForRoute(routeId: string) {
   const params = new URLSearchParams({
-    "filter[route]": routeId,
-    "page[limit]": "1",
+    route: routeId,          // ✅ matches backend
+    page_limit: "1",
+    page_offset: "0",
   })
   const json = await getJSON(`${API_BASE}/mbta/shapes?${params.toString()}`)
-  return json.data?.[0]?.attributes?.polyline
+  return json.data?.[0]?.attributes?.polyline ?? null
 }
-
 
