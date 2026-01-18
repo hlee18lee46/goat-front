@@ -66,19 +66,6 @@ export default function LandingPage() {
           </section>
 
           {/* TECH STACK */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-            <h2 className="text-xl font-bold mb-3">Tech Stack</h2>
-            <ul className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-gray-300">
-              <li>Next.js (App Router)</li>
-              <li>FastAPI</li>
-              <li>DigitalOcean Gradient</li>
-              <li>Local Docker LLMs</li>
-              <li>MIDI Generation</li>
-              <li>Tailwind CSS</li>
-              <li>Python Audio Tooling</li>
-              <li>Open Models (LLaMA)</li>
-            </ul>
-          </section>
 
           {/* FOOTER */}
           <footer className="text-center text-xs text-gray-500 pt-10">

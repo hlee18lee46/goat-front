@@ -16,8 +16,8 @@ export function Header({ onConnect }: HeaderProps) {
             <Train className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">SolTransit</h1>
-            <p className="text-xs text-muted-foreground">MBTA • Devnet</p>
+            <h1 className="text-lg font-semibold text-foreground">Vibe-Composer</h1>
+            <p className="text-xs text-muted-foreground"> vibe the music</p>
           </div>
         </div>
         <WalletButton onConnect={onConnect} />

@@ -13,7 +13,7 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "SolTransit - MBTA Route Finder",
+  title: "Vibe-Composer - Generate your midi, mp3 files with your prmopt",
   description: "Web3 powered transit route finder for Boston MBTA",
   generator: "v0.app",
 }
