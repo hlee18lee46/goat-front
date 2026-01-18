@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AppHeader } from "@/components/app-header"; // ✅ correct import
+import { AppHeader } from "@/components/app-header";
 
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
@@ -14,6 +14,8 @@ export default function Page() {
         "You are a helpful assistant. Vibe-Composer is a web application users can use to compose midi files and use gradient ai (llama) to generate midi song file.",
     },
   ]);
+
+  const [sessionId, setSessionId] = useState<string | null>(null); // ✅ ADD
   const [loading, setLoading] = useState(false);
 
   async function send() {
@@ -27,10 +29,13 @@ export default function Page() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: next }),
+      body: JSON.stringify({ messages: next, sessionId }), // ✅ ADD sessionId
     });
 
     const data = await res.json();
+
+    if (data?.sessionId) setSessionId(data.sessionId); // ✅ ADD
+
     const reply =
       data?.choices?.[0]?.message?.content ??
       data?.choices?.[0]?.text ??
@@ -42,13 +47,11 @@ export default function Page() {
 
   return (
     <>
-      {/* ✅ HEADER WITH NAV LINKS */}
       <AppHeader
         title="Chat with smollm2"
         subtitle="Local LLM chat (Docker model runner)"
       />
 
-      {/* ⬇️ everything below is unchanged */}
       <main style={{ maxWidth: 800, margin: "40px auto", padding: 16 }}>
         <h1>Local LLM Chat (Docker Model Runner)</h1>
 

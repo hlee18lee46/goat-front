@@ -16,6 +16,7 @@ const navItems = [
   { label: "Compose", href: "/vibe-composer" },
   { label: "Gradient", href: "/gradient-chat" },
   { label: "Chat", href: "/smollm2" },
+  { label: "Songs", href: "/songs" }, // ✅ add
 ];
 
 export function AppHeader({
