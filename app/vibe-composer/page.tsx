@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { useWallet } from "@/components/wallet-context"; // ✅ ADDED
+import { useWallet } from "@/components/wallet-context"; // ✅ wallet
 
 const BACKEND =
   process.env.NEXT_PUBLIC_VIBE_API_BASE ?? "http://127.0.0.1:8010"; // music api
 const GRADIENT_BACKEND =
   process.env.NEXT_PUBLIC_GRADIENT_API_BASE ?? "http://127.0.0.1:8005"; // ai + snowflake api
+const REWARD_BACKEND =
+  process.env.NEXT_PUBLIC_REWARD_API_BASE ?? "https://sol-render.onrender.com"; // ✅ solana reward api
 
 const VIBES = ["edm", "lofi", "trap", "cinematic"] as const;
 const KEYS = [
@@ -89,8 +91,32 @@ function asNullIfEmpty(s: string) {
   return t.length ? t : null;
 }
 
+function stringifyErr(detail: any) {
+  if (!detail) return "Unknown error";
+  if (typeof detail === "string") return detail;
+  if (detail.error) return String(detail.error);
+  if (detail.message) return String(detail.message);
+  if (detail.detail) return stringifyErr(detail.detail);
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return String(detail);
+  }
+}
+
+type RewardResponse =
+  | {
+      ok: true;
+      already_paid: boolean;
+      amount_sol?: number;
+      from_wallet?: string;
+      to_wallet?: string;
+      signature?: string;
+    }
+  | { ok?: false; detail?: any; error?: string };
+
 export default function VibeComposerPage() {
-  const { walletAddress } = useWallet(); // ✅ ADDED (real connected wallet)
+  const { walletAddress } = useWallet(); // ✅ connected wallet (receiver)
 
   // ---- generator params ----
   const [name, setName] = useState("vibe_song");
@@ -125,6 +151,11 @@ export default function VibeComposerPage() {
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const [savedRowId, setSavedRowId] = useState("");
+
+  // ---- ✅ Reward state ----
+  const [rewardBusy, setRewardBusy] = useState(false);
+  const [rewardStatus, setRewardStatus] = useState("");
+  const [rewardResp, setRewardResp] = useState<RewardResponse | null>(null);
 
   const canRun = useMemo(
     () => name.trim().length > 0 && busy === "" && !aiBusy && !saveBusy,
@@ -205,7 +236,7 @@ export default function VibeComposerPage() {
     try {
       const blob = await postBinary("/v1/song/mp3");
       const url = triggerDownload(blob, `${name}.mp3`);
-      setAudioUrl(url); // local preview only
+      setAudioUrl(url);
       setStatus("MP3 ready ✅ (downloaded)");
     } catch (e: any) {
       setStatus(`Error: ${e.message}`);
@@ -287,10 +318,63 @@ export default function VibeComposerPage() {
     setTimeout(() => handleMp3(), 0);
   }
 
+  // ✅ build a stable idempotency key for reward
+  function rewardKey() {
+    // Prefer savedRowId (unique, stable). Fallback to name+wallet.
+    const base = savedRowId
+      ? `song_${savedRowId}`
+      : `song_${name.trim() || "untitled"}_${walletAddress || "no_wallet"}`;
+    return base;
+  }
+
+  async function handleReward() {
+    if (rewardBusy) return;
+
+    if (!walletAddress) {
+      setRewardStatus("Connect wallet first (receiver wallet needed)");
+      setTimeout(() => setRewardStatus(""), 2500);
+      return;
+    }
+
+    setRewardBusy(true);
+    setRewardStatus("Sending 0.01 SOL reward...");
+    setRewardResp(null);
+
+    try {
+      const res = await fetch(`${REWARD_BACKEND}/reward/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiver_wallet_address: walletAddress,
+          amount_sol: 0.01,
+          idempotency_key: rewardKey(),
+        }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      const data = ct.includes("application/json")
+        ? await res.json().catch(() => ({}))
+        : { error: await res.text().catch(() => "") };
+
+      if (!res.ok) {
+        throw new Error(stringifyErr(data));
+      }
+
+      setRewardResp(data);
+      setRewardStatus(
+        data?.already_paid ? "Already rewarded ✅" : "Reward sent ✅"
+      );
+    } catch (e: any) {
+      setRewardStatus(`Reward Error: ${e?.message ?? String(e)}`);
+    } finally {
+      setRewardBusy(false);
+      setTimeout(() => setRewardStatus(""), 3500);
+    }
+  }
+
   async function handleSaveToSnowflake() {
     if (saveBusy) return;
 
-    // ✅ IMPORTANT: ensure wallet connected so per-user fetch works
     if (!walletAddress) {
       setSaveStatus("Connect wallet first (needed to save songs per user)");
       setTimeout(() => setSaveStatus(""), 2500);
@@ -303,11 +387,9 @@ export default function VibeComposerPage() {
 
     try {
       const payload = {
-        // basic identity
         name: name.trim(),
         artist: artist.trim() || null,
 
-        // params
         vibe,
         bpm,
         key,
@@ -316,17 +398,14 @@ export default function VibeComposerPage() {
         energy,
         seed: seed === "" ? 42 : seed,
 
-        // urls (all optional)
         audio_url: asNullIfEmpty(publicAudioUrl),
         midi_url: asNullIfEmpty(midiPublicUrl),
         video_url: asNullIfEmpty(videoUrl),
         cover_url: asNullIfEmpty(coverUrl),
 
-        // ✅ WALLET BINDING (this fixes your problem)
         solana_wallet: walletAddress,
-        solana_signature: null, // set later when you publish/sign tx
+        solana_signature: null,
 
-        // optional fields for future use
         audio_sha256: null,
         ai_prompt: asNullIfEmpty(aiPrompt),
       };
@@ -356,6 +435,9 @@ export default function VibeComposerPage() {
       const rowId = data?.id || data?.inserted_id || "";
       setSavedRowId(rowId);
       setSaveStatus("Saved ✅");
+
+      // ✅ OPTIONAL: auto-reward right after save
+      // await handleReward();
     } catch (e: any) {
       setSaveStatus(`Error: ${e.message}`);
     } finally {
@@ -363,6 +445,9 @@ export default function VibeComposerPage() {
       setTimeout(() => setSaveStatus(""), 2500);
     }
   }
+
+  const rewardSig = (rewardResp as any)?.signature as string | undefined;
+  const rewardAlready = (rewardResp as any)?.already_paid as boolean | undefined;
 
   return (
     <div className="min-h-screen bg-black text-gray-100">
@@ -372,7 +457,7 @@ export default function VibeComposerPage() {
             Vibe <span className="text-blue-600">Composer</span>
           </>
         }
-        subtitle={`Music API: ${BACKEND} • AI/Snowflake API: ${GRADIENT_BACKEND}`}
+        subtitle={`Music API: ${BACKEND} • AI/Snowflake API: ${GRADIENT_BACKEND} • Reward API: ${REWARD_BACKEND}`}
       />
 
       <main className="container mx-auto px-4 py-8">
@@ -402,9 +487,9 @@ export default function VibeComposerPage() {
               <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={handleAiFillParams}
-                  disabled={aiBusy || saveBusy}
+                  disabled={aiBusy || saveBusy || rewardBusy}
                   className={`rounded-lg py-2 text-sm font-bold text-white ${
-                    aiBusy || saveBusy
+                    aiBusy || saveBusy || rewardBusy
                       ? "bg-gray-600 cursor-not-allowed"
                       : "bg-purple-600 hover:bg-purple-700"
                   }`}
@@ -414,9 +499,9 @@ export default function VibeComposerPage() {
 
                 <button
                   onClick={aiThenMidi}
-                  disabled={aiBusy || busy !== "" || saveBusy}
+                  disabled={aiBusy || busy !== "" || saveBusy || rewardBusy}
                   className={`rounded-lg py-2 text-sm font-bold text-white ${
-                    aiBusy || busy !== "" || saveBusy
+                    aiBusy || busy !== "" || saveBusy || rewardBusy
                       ? "bg-gray-600 cursor-not-allowed"
                       : "bg-gray-800 hover:bg-gray-900"
                   }`}
@@ -426,9 +511,9 @@ export default function VibeComposerPage() {
 
                 <button
                   onClick={aiThenMp3}
-                  disabled={aiBusy || busy !== "" || saveBusy}
+                  disabled={aiBusy || busy !== "" || saveBusy || rewardBusy}
                   className={`rounded-lg py-2 text-sm font-bold text-white ${
-                    aiBusy || busy !== "" || saveBusy
+                    aiBusy || busy !== "" || saveBusy || rewardBusy
                       ? "bg-gray-600 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700"
                   }`}
@@ -446,6 +531,72 @@ export default function VibeComposerPage() {
               </p>
             </div>
 
+            {/* ✅ REWARD */}
+            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-gray-100">
+                  Reward (Solana Devnet)
+                </h3>
+                <span className="text-xs text-gray-400">
+                  {rewardBusy ? "Sending..." : rewardStatus || ""}
+                </span>
+              </div>
+
+              {!walletAddress && (
+                <div className="rounded border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                  Wallet not connected. Connect wallet to receive rewards.
+                </div>
+              )}
+
+              <div className="text-xs text-gray-400">
+                Receiver:{" "}
+                <span className="text-gray-200 break-all">
+                  {walletAddress ?? "(not connected)"}
+                </span>
+              </div>
+
+              <div className="text-xs text-gray-400">
+                Idempotency key:{" "}
+                <span className="text-gray-200 break-all">{rewardKey()}</span>
+              </div>
+
+              <button
+                onClick={handleReward}
+                disabled={!walletAddress || rewardBusy || saveBusy || aiBusy || busy !== ""}
+                className={`w-full rounded-lg py-2 text-sm font-bold text-white ${
+                  !walletAddress || rewardBusy || saveBusy || aiBusy || busy !== ""
+                    ? "bg-gray-600 cursor-not-allowed"
+                    : "bg-indigo-600 hover:bg-indigo-700"
+                }`}
+              >
+                {rewardBusy ? "Sending..." : "Reward 0.01 SOL"}
+              </button>
+
+              {rewardResp && (rewardResp as any).ok && (
+                <div className="rounded border border-zinc-800 bg-zinc-900 p-3 text-xs text-gray-200 space-y-1">
+                  <div>
+                    Status:{" "}
+                    <span className="font-semibold">
+                      {rewardAlready ? "Already paid (idempotent)" : "Paid"}
+                    </span>
+                  </div>
+                  {rewardSig && (
+                    <div>
+                      Signature:{" "}
+                      <a
+                        className="underline"
+                        href={`https://explorer.solana.com/tx/${rewardSig}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {rewardSig.slice(0, 12)}…{rewardSig.slice(-12)}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* SAVE TO SNOWFLAKE */}
             <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <div className="flex items-center justify-between">
@@ -457,7 +608,6 @@ export default function VibeComposerPage() {
                 </span>
               </div>
 
-              {/* ✅ show wallet warning */}
               {!walletAddress && (
                 <div className="rounded border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
                   Wallet not connected. Connect wallet to save songs under your
@@ -528,9 +678,9 @@ export default function VibeComposerPage() {
 
               <button
                 onClick={handleSaveToSnowflake}
-                disabled={saveBusy || aiBusy || busy !== "" || !walletAddress}
+                disabled={saveBusy || aiBusy || rewardBusy || busy !== "" || !walletAddress}
                 className={`w-full rounded-lg py-2 text-sm font-bold text-white ${
-                  saveBusy || aiBusy || busy !== "" || !walletAddress
+                  saveBusy || aiBusy || rewardBusy || busy !== "" || !walletAddress
                     ? "bg-gray-600 cursor-not-allowed"
                     : "bg-emerald-600 hover:bg-emerald-700"
                 }`}
@@ -552,7 +702,7 @@ export default function VibeComposerPage() {
                 <code className="rounded bg-zinc-900 px-1">
                   {GRADIENT_BACKEND}/snowflake/song-metadata
                 </code>
-                . It now includes{" "}
+                . It includes{" "}
                 <code className="rounded bg-zinc-900 px-1">solana_wallet</code>{" "}
                 from your connected wallet.
               </p>
@@ -679,9 +829,9 @@ export default function VibeComposerPage() {
             <div className="grid grid-cols-2 gap-4 pt-2">
               <button
                 onClick={handleMidi}
-                disabled={!canRun}
+                disabled={!canRun || rewardBusy}
                 className={`w-full rounded-lg py-3 font-bold text-white transition ${
-                  canRun
+                  canRun && !rewardBusy
                     ? "bg-gray-800 hover:bg-gray-900"
                     : "bg-gray-600 cursor-not-allowed"
                 }`}
@@ -691,9 +841,9 @@ export default function VibeComposerPage() {
 
               <button
                 onClick={handleMp3}
-                disabled={!canRun}
+                disabled={!canRun || rewardBusy}
                 className={`w-full rounded-lg py-3 font-bold text-white transition ${
-                  canRun
+                  canRun && !rewardBusy
                     ? "bg-blue-600 hover:bg-blue-700"
                     : "bg-gray-600 cursor-not-allowed"
                 }`}
@@ -734,7 +884,11 @@ export default function VibeComposerPage() {
           <code className="rounded bg-zinc-900 px-1 ml-2">
             NEXT_PUBLIC_GRADIENT_API_BASE
           </code>{" "}
-          (AI/Snowflake API)
+          (AI/Snowflake API),
+          <code className="rounded bg-zinc-900 px-1 ml-2">
+            NEXT_PUBLIC_REWARD_API_BASE
+          </code>{" "}
+          (Solana reward API)
         </p>
       </main>
     </div>
