@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { useWallet } from "@/components/wallet-context"; // ✅ ADDED
 
 const BACKEND =
   process.env.NEXT_PUBLIC_VIBE_API_BASE ?? "http://127.0.0.1:8010"; // music api
@@ -83,16 +84,14 @@ function clampInt(v: string, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function keyModeToString(key: string, mode: string) {
-  return `${key} ${mode}`;
-}
-
 function asNullIfEmpty(s: string) {
   const t = (s ?? "").trim();
   return t.length ? t : null;
 }
 
 export default function VibeComposerPage() {
+  const { walletAddress } = useWallet(); // ✅ ADDED (real connected wallet)
+
   // ---- generator params ----
   const [name, setName] = useState("vibe_song");
   const [vibe, setVibe] = useState<Vibe>("edm");
@@ -266,7 +265,8 @@ export default function VibeComposerPage() {
       if (typeof p.bpm === "number") setBpm(clamp(Math.round(p.bpm), 40, 220));
       if (typeof p.bars === "number") setBars(clamp(Math.round(p.bars), 1, 64));
       if (typeof p.energy === "number") setEnergy(clamp(p.energy, 0, 1));
-      if (typeof p.seed === "number") setSeed(clamp(Math.round(p.seed), 0, 1_000_000));
+      if (typeof p.seed === "number")
+        setSeed(clamp(Math.round(p.seed), 0, 1_000_000));
 
       setAiStatus("Params filled ✅");
     } catch (e: any) {
@@ -290,8 +290,13 @@ export default function VibeComposerPage() {
   async function handleSaveToSnowflake() {
     if (saveBusy) return;
 
-    // audio_url can be optional in DB, but you probably want it usually
-    // so we won't hard-block. We'll just warn in status.
+    // ✅ IMPORTANT: ensure wallet connected so per-user fetch works
+    if (!walletAddress) {
+      setSaveStatus("Connect wallet first (needed to save songs per user)");
+      setTimeout(() => setSaveStatus(""), 2500);
+      return;
+    }
+
     setSaveBusy(true);
     setSaveStatus("Saving to Snowflake...");
     setSavedRowId("");
@@ -316,6 +321,10 @@ export default function VibeComposerPage() {
         midi_url: asNullIfEmpty(midiPublicUrl),
         video_url: asNullIfEmpty(videoUrl),
         cover_url: asNullIfEmpty(coverUrl),
+
+        // ✅ WALLET BINDING (this fixes your problem)
+        solana_wallet: walletAddress,
+        solana_signature: null, // set later when you publish/sign tx
 
         // optional fields for future use
         audio_sha256: null,
@@ -373,7 +382,9 @@ export default function VibeComposerPage() {
             {/* GRADIENT AI */}
             <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-100">Gradient AI → Params JSON</h3>
+                <h3 className="text-sm font-bold text-gray-100">
+                  Gradient AI → Params JSON
+                </h3>
                 <span className="text-xs text-gray-400">
                   {aiBusy ? "Working..." : aiStatus || ""}
                 </span>
@@ -438,11 +449,21 @@ export default function VibeComposerPage() {
             {/* SAVE TO SNOWFLAKE */}
             <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-100">Save metadata to Snowflake</h3>
+                <h3 className="text-sm font-bold text-gray-100">
+                  Save metadata to Snowflake
+                </h3>
                 <span className="text-xs text-gray-400">
                   {saveBusy ? "Saving..." : saveStatus || ""}
                 </span>
               </div>
+
+              {/* ✅ show wallet warning */}
+              {!walletAddress && (
+                <div className="rounded border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                  Wallet not connected. Connect wallet to save songs under your
+                  address.
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -456,7 +477,9 @@ export default function VibeComposerPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs text-gray-300">Cover URL (optional)</label>
+                  <label className="text-xs text-gray-300">
+                    Cover URL (optional)
+                  </label>
                   <input
                     className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-gray-100"
                     value={coverUrl}
@@ -467,7 +490,9 @@ export default function VibeComposerPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs text-gray-300">Audio URL (optional, public https)</label>
+                <label className="text-xs text-gray-300">
+                  Audio URL (optional, public https)
+                </label>
                 <input
                   className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-gray-100"
                   value={publicAudioUrl}
@@ -478,7 +503,9 @@ export default function VibeComposerPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs text-gray-300">MIDI URL (optional)</label>
+                  <label className="text-xs text-gray-300">
+                    MIDI URL (optional)
+                  </label>
                   <input
                     className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-gray-100"
                     value={midiPublicUrl}
@@ -487,7 +514,9 @@ export default function VibeComposerPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs text-gray-300">Video URL (optional)</label>
+                  <label className="text-xs text-gray-300">
+                    Video URL (optional)
+                  </label>
                   <input
                     className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-sm text-gray-100"
                     value={videoUrl}
@@ -499,9 +528,9 @@ export default function VibeComposerPage() {
 
               <button
                 onClick={handleSaveToSnowflake}
-                disabled={saveBusy || aiBusy || busy !== ""}
+                disabled={saveBusy || aiBusy || busy !== "" || !walletAddress}
                 className={`w-full rounded-lg py-2 text-sm font-bold text-white ${
-                  saveBusy || aiBusy || busy !== ""
+                  saveBusy || aiBusy || busy !== "" || !walletAddress
                     ? "bg-gray-600 cursor-not-allowed"
                     : "bg-emerald-600 hover:bg-emerald-700"
                 }`}
@@ -512,7 +541,9 @@ export default function VibeComposerPage() {
               {savedRowId && (
                 <div className="rounded border border-zinc-800 bg-zinc-900 p-3">
                   <div className="text-xs text-gray-400">Saved Row ID</div>
-                  <div className="break-all text-sm text-gray-100">{savedRowId}</div>
+                  <div className="break-all text-sm text-gray-100">
+                    {savedRowId}
+                  </div>
                 </div>
               )}
 
@@ -521,7 +552,9 @@ export default function VibeComposerPage() {
                 <code className="rounded bg-zinc-900 px-1">
                   {GRADIENT_BACKEND}/snowflake/song-metadata
                 </code>
-                . All URL fields are optional.
+                . It now includes{" "}
+                <code className="rounded bg-zinc-900 px-1">solana_wallet</code>{" "}
+                from your connected wallet.
               </p>
             </div>
 
@@ -612,7 +645,9 @@ export default function VibeComposerPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Energy: {energy.toFixed(2)}</label>
+                <label className="text-sm font-medium">
+                  Energy: {energy.toFixed(2)}
+                </label>
                 <input
                   type="range"
                   min={0}
@@ -677,7 +712,8 @@ export default function VibeComposerPage() {
                 <h3 className="text-lg font-semibold text-center">Preview</h3>
                 <audio src={audioUrl} controls className="w-full" />
                 <p className="text-xs text-gray-400 text-center">
-                  Browser preview should work. If it fails, download and play in a real player.
+                  Browser preview should work. If it fails, download and play in
+                  a real player.
                 </p>
               </div>
             ) : (
